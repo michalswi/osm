@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -123,23 +124,17 @@ func oms(w http.ResponseWriter, r *http.Request) {
 	lat := "51.109970"
 	lon := "17.031984"
 
-	// Check for URL query parameters
+	// Check URL query parameters and validate input (xss)
 	if r.URL.Query().Has("lat") && r.URL.Query().Has("lon") {
-		lat = r.URL.Query().Get("lat")
-		lon = r.URL.Query().Get("lon")
-	}
-
-	// avoid XSS attacks (basic)
-	if latParam := r.URL.Query().Get("lat"); latParam != "" {
-		if _, err := strconv.ParseFloat(latParam, 64); err == nil {
-			lat = latParam
+		latParam := r.URL.Query().Get("lat")
+		lonParam := r.URL.Query().Get("lon")
+		if parsedLat, err := strconv.ParseFloat(latParam, 64); err == nil {
+			lat = fmt.Sprintf("%f", parsedLat)
 		} else {
 			log.Println("Invalid latitude value:", latParam)
 		}
-	}
-	if lonParam := r.URL.Query().Get("lon"); lonParam != "" {
-		if _, err := strconv.ParseFloat(lonParam, 64); err == nil {
-			lon = lonParam
+		if parsedLon, err := strconv.ParseFloat(lonParam, 64); err == nil {
+			lon = fmt.Sprintf("%f", parsedLon)
 		} else {
 			log.Println("Invalid longitude value:", lonParam)
 		}
