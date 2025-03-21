@@ -1,3 +1,3 @@
-# OpenStreetMap - getting coordinates
+# OpenStreetMap - coordinates
 
 ![alt text](image.png)
