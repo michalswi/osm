@@ -8,104 +8,286 @@ import (
 	"strconv"
 )
 
+var logger = log.New(log.Writer(), "osm: ", log.LstdFlags|log.Lshortfile)
+
+// This is a simple web server that serves a map page using Leaflet.js and OpenStreetMap.
+// It allows users to search for places, enter coordinates, and find their current location.
+// The map can be displayed in different styles (street, satellite, dark).
+
 var tpl = template.Must(template.New("page").Parse(`
 <!DOCTYPE html>
 <html>
 <head>
-	<title>osm</title>
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-	<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-	<style>
-		body { font-family: Arial, sans-serif; text-align: center; }
-		#map { height: 70vh; margin-top: 10px; }
-		.input-container { margin: 10px; }
-		input { padding: 8px; margin: 5px; width: 120px; }
-		button { padding: 8px; cursor: pointer; }
-	</style>
+    <title>osm</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            text-align: center; 
+            transition: background-color 0.3s, color 0.3s; 
+        }
+        body.light { 
+            background-color: #f0f0f0; 
+            color: #000; 
+        }
+        body.dark { 
+            background-color: #333; 
+            color: #fff; 
+        }
+        body.dark input, body.dark select, body.dark button {
+            background-color: #555;
+            color: #fff;
+            border: 1px solid #777;
+        }
+        body.dark button:hover {
+            background-color: #666;
+        }
+        #map { 
+            height: 70vh; 
+            margin-top: 10px; 
+        }
+        .input-container { 
+            margin: 10px; 
+        }
+        input { 
+            padding: 8px; 
+            margin: 5px; 
+            width: 120px; 
+            transition: background-color 0.3s, color 0.3s, border 0.3s; 
+        }
+        #search { 
+            width: 200px; 
+        }
+        select { 
+            padding: 8px; 
+            margin: 5px; 
+            transition: background-color 0.3s, color 0.3s, border 0.3s; 
+        }
+        button { 
+            padding: 8px; 
+            cursor: pointer; 
+            transition: background-color 0.3s, color 0.3s, border 0.3s; 
+        }
+        #theme-toggle { 
+            position: absolute; 
+            top: 10px; 
+            right: 10px; 
+        }
+    </style>
 </head>
-<body>
-	<h2>Enter Latitude & Longitude</h2>
-	<div class="input-container">
-		<input type="number" id="lat" placeholder="Latitude" step="any" value="{{.Lat}}">
-		<input type="number" id="lon" placeholder="Longitude" step="any" value="{{.Lon}}">
-		<button onclick="updateMap()">Show Location</button>
-	</div>
+<body class="light">
+    <button id="theme-toggle" onclick="toggleTheme()">🌙 Dark Mode</button>
 
-	<h2>OR Enter Coordinates (lat,lon)</h2>
-	<div class="input-container">
-		<input type="text" id="coord" placeholder="e.g. 12.34,56.78">
-		<button onclick="updateMapFromText()">Find Location</button>
-	</div>
+    <h2>Search for a Place</h2>
+    <div class="input-container">
+        <input type="text" id="search" placeholder="e.g. Wrocław, Poland">
+        <button onclick="searchPlace()">Search</button>
+    </div>
 
-	<h3>Click on the map to get coordinates</h3>
+    <h2>Enter Latitude & Longitude</h2>
+    <div class="input-container">
+        <input type="number" id="lat" placeholder="Latitude" step="any" value="{{.Lat}}">
+        <input type="number" id="lon" placeholder="Longitude" step="any" value="{{.Lon}}">
+        <button onclick="updateMap()">Show Location</button>
+    </div>
 
-	<div id="map"></div>
+    <h2>OR Enter Coordinates (lat,lon)</h2>
+    <div class="input-container">
+        <input type="text" id="coord" placeholder="e.g. 12.34,56.78">
+        <button onclick="updateMapFromText()">Find Location</button>
+    </div>
 
-	<script>
-		var lat = parseFloat("{{.Lat}}");
-		var lon = parseFloat("{{.Lon}}");
+    <h2>OR Find Your Current Location</h2>
+    <div class="input-container">
+        <button onclick="findMyLocation()">Find Me</button>
+    </div>
 
-		var map = L.map('map').setView([lat, lon], 13);
+    <h2>Map Type</h2>
+    <div class="input-container">
+        <select id="map-type" onchange="switchMapType()">
+            <option value="street">Street Map</option>
+            <option value="satellite">Satellite</option>
+            <option value="dark">Dark Map</option>
+        </select>
+    </div>
 
-		L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-			attribution: '&copy; OpenStreetMap contributors'
-		}).addTo(map);
+    <h3>Click on the map to get coordinates</h3>
 
-		var marker = L.marker([lat, lon], { draggable: true }).addTo(map)
-			.bindPopup("Current Location")
-			.openPopup();
+    <div id="map"></div>
 
-		function updateMap() {
-			var newLat = parseFloat(document.getElementById('lat').value);
-			var newLon = parseFloat(document.getElementById('lon').value);
+    <script>
+        var lat = parseFloat("{{.Lat}}");
+        var lon = parseFloat("{{.Lon}}");
 
-			if (!isNaN(newLat) && !isNaN(newLon)) {
-				map.setView([newLat, newLon], 13);
-				marker.setLatLng([newLat, newLon])
-					.bindPopup("New Location: " + newLat + ", " + newLon)
-					.openPopup();
-			} else {
-				alert("Please enter valid latitude and longitude values.");
-			}
-		}
+        var map = L.map('map', {
+            zoomControl: true // Enable zoom controls
+        }).setView([lat, lon], 13);
 
-		function updateMapFromText() {
-			var input = document.getElementById('coord').value.trim();
-			var parts = input.split(",");
+        var lightTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        });
 
-			if (parts.length === 2) {
-				var newLat = parseFloat(parts[0]);
-				var newLon = parseFloat(parts[1]);
+        var satelliteTiles = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+            attribution: '© Google Maps'
+        });
 
-				if (!isNaN(newLat) && !isNaN(newLon)) {
-					document.getElementById('lat').value = newLat;
-					document.getElementById('lon').value = newLon;
-					updateMap();
-				} else {
-					alert("Invalid format. Use lat,lon (e.g. 12.34,56.78).");
-				}
-			} else {
-				alert("Invalid format. Use lat,lon (e.g. 12.34,56.78).");
-			}
-		}
+        var darkTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '© OpenStreetMap contributors © CARTO'
+        });
 
-		// Click event to get coordinates
-		map.on('click', function(e) {
-			var clickedLat = e.latlng.lat.toFixed(6);
-			var clickedLon = e.latlng.lng.toFixed(6);
+        var currentTiles = lightTiles; // Default to street map
+        currentTiles.addTo(map);
 
-			// Update input fields
-			document.getElementById('lat').value = clickedLat;
-			document.getElementById('lon').value = clickedLon;
+        var marker = L.marker([lat, lon], { draggable: true }).addTo(map)
+            .bindPopup("Default Location")
+            .openPopup();
 
-			// Move marker to clicked location
-			marker.setLatLng([clickedLat, clickedLon])
-				.bindPopup("Clicked Location: " + clickedLat + ", " + clickedLon)
-				.openPopup();
-		});
-	</script>
+        function updateMap() {
+            var newLat = parseFloat(document.getElementById('lat').value);
+            var newLon = parseFloat(document.getElementById('lon').value);
+
+            if (!isNaN(newLat) && !isNaN(newLon)) {
+                map.setView([newLat, newLon], 13);
+                marker.setLatLng([newLat, newLon])
+                    .bindPopup("New Location: " + newLat + ", " + newLon)
+                    .openPopup();
+            } else {
+                alert("Please enter valid latitude and longitude values.");
+            }
+        }
+
+        function updateMapFromText() {
+            var input = document.getElementById('coord').value.trim();
+            var parts = input.split(",");
+
+            if (parts.length === 2) {
+                var newLat = parseFloat(parts[0]);
+                var newLon = parseFloat(parts[1]);
+
+                if (!isNaN(newLat) && !isNaN(newLon)) {
+                    document.getElementById('lat').value = newLat;
+                    document.getElementById('lon').value = newLon;
+                    updateMap();
+                } else {
+                    alert("Invalid format. Use lat,lon (e.g. 12.34,56.78).");
+                }
+            } else {
+                alert("Invalid format. Use lat,lon (e.g. 12.34,56.78).");
+            }
+        }
+
+        // Click event to get coordinates
+        map.on('click', function(e) {
+            var clickedLat = e.latlng.lat.toFixed(6);
+            var clickedLon = e.latlng.lng.toFixed(6);
+
+            // Update input fields
+            document.getElementById('lat').value = clickedLat;
+            document.getElementById('lon').value = clickedLon;
+
+            // Move marker to clicked location
+            marker.setLatLng([clickedLat, clickedLon])
+                .bindPopup("Clicked Location: " + clickedLat + ", " + clickedLon)
+                .openPopup();
+        });
+
+        // Find user's current location
+        function findMyLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    function(position) {
+                        var newLat = position.coords.latitude;
+                        var newLon = position.coords.longitude;
+
+                        // Update input fields
+                        document.getElementById('lat').value = newLat.toFixed(6);
+                        document.getElementById('lon').value = newLon.toFixed(6);
+
+                        // Update map and marker
+                        map.setView([newLat, newLon], 13);
+                        marker.setLatLng([newLat, newLon])
+                            .bindPopup("Your Location: " + newLat.toFixed(6) + ", " + newLon.toFixed(6))
+                            .openPopup();
+                    },
+                    function(error) {
+                        alert("Unable to get your location: " + error.message);
+                    }
+                );
+            } else {
+                alert("Geolocation is not supported by your browser.");
+            }
+        }
+
+        // Search for a place using Nominatim API
+        function searchPlace() {
+            var query = document.getElementById('search').value.trim();
+            if (query === "") {
+                alert("Please enter a place to search for.");
+                return;
+            }
+
+            fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(query))
+                .then(response => response.json())
+                .then(data => {
+                    if (data.length > 0) {
+                        var newLat = parseFloat(data[0].lat);
+                        var newLon = parseFloat(data[0].lon);
+
+                        // Update input fields
+                        document.getElementById('lat').value = newLat.toFixed(6);
+                        document.getElementById('lon').value = newLon.toFixed(6);
+
+                        // Update map and marker
+                        map.setView([newLat, newLon], 13);
+                        marker.setLatLng([newLat, newLon])
+                            .bindPopup("Searched Location: " + data[0].display_name)
+                            .openPopup();
+                    } else {
+                        alert("Place not found.");
+                    }
+                })
+                .catch(error => {
+                    alert("Error searching for place: " + error.message);
+                });
+        }
+
+        // Switch map type
+        function switchMapType() {
+            var mapType = document.getElementById('map-type').value;
+            currentTiles.remove();
+            if (mapType === 'street') {
+                currentTiles = lightTiles;
+            } else if (mapType === 'satellite') {
+                currentTiles = satelliteTiles;
+            } else if (mapType === 'dark') {
+                currentTiles = darkTiles;
+            }
+            currentTiles.addTo(map);
+        }
+
+        // Dark mode toggle (affects UI only, not the map)
+        function toggleTheme() {
+            var body = document.body;
+            if (body.classList.contains('light')) {
+                body.classList.remove('light');
+                body.classList.add('dark');
+                document.getElementById('theme-toggle').innerText = '☀️ Light Mode';
+            } else {
+                body.classList.remove('dark');
+                body.classList.add('light');
+                document.getElementById('theme-toggle').innerText = '🌙 Dark Mode';
+            }
+        }
+    </script>
+	<div class="container">
+      <hr/>
+      <p>
+        Copyright &copy; 2049
+        michalswi<br>
+    </div>
 </body>
 </html>
 `))
@@ -113,8 +295,8 @@ var tpl = template.Must(template.New("page").Parse(`
 func main() {
 	var port = "5050"
 	http.HandleFunc("/", oms)
-	log.Printf("Server started at http://localhost:%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	logger.Printf("Server started at http://localhost:%s", port)
+	logger.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
 func oms(w http.ResponseWriter, r *http.Request) {
@@ -131,12 +313,12 @@ func oms(w http.ResponseWriter, r *http.Request) {
 		if parsedLat, err := strconv.ParseFloat(latParam, 64); err == nil {
 			lat = fmt.Sprintf("%f", parsedLat)
 		} else {
-			log.Println("Invalid latitude value:", latParam)
+			logger.Println("Invalid latitude value:", latParam)
 		}
 		if parsedLon, err := strconv.ParseFloat(lonParam, 64); err == nil {
 			lon = fmt.Sprintf("%f", parsedLon)
 		} else {
-			log.Println("Invalid longitude value:", lonParam)
+			logger.Println("Invalid longitude value:", lonParam)
 		}
 	}
 
