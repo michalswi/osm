@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"sync"
 
 	"github.com/michalswi/osm/server"
 )
@@ -43,6 +44,8 @@ type ClientLocation struct {
 	As     string  `json:"as"`
 	Asname string  `json:"asname"`
 }
+
+var logMutex sync.Mutex
 
 func main() {
 
@@ -173,12 +176,55 @@ func logRequestDetails(r *http.Request) {
 		Referer:       ref,
 	}
 
+	// Log to console
 	b, err := json.Marshal(datas)
 	if err != nil {
 		logger.Println("Error marshalling JSON:", err)
 		return
 	}
 	logger.Printf("%s", b)
+
+	// Log to JSON file as a single array
+	logMutex.Lock()
+	defer logMutex.Unlock()
+
+	// read the existing file
+	var requests []Request
+	data, err := os.ReadFile("requests.log")
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logger.Println("Error reading requests.log:", err)
+			return
+		}
+		// if the file doesn't exist, initialize an empty array
+		requests = []Request{}
+	} else {
+		// if the file exists, unmarshal its contents
+		if len(data) > 0 {
+			err = json.Unmarshal(data, &requests)
+			if err != nil {
+				logger.Println("Error unmarshaling requests.log:", err)
+				return
+			}
+		} else {
+			// if the file is empty, initialize an empty array
+			requests = []Request{}
+		}
+	}
+
+	requests = append(requests, *datas)
+
+	updatedData, err := json.MarshalIndent(requests, "", "    ")
+	if err != nil {
+		logger.Println("Error marshaling updated requests:", err)
+		return
+	}
+
+	err = os.WriteFile("requests.log", updatedData, 0644)
+	if err != nil {
+		logger.Println("Error writing to requests.log:", err)
+		return
+	}
 }
 
 // parseLocationString splits a "latitude,longitude" string into floats
