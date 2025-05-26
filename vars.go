@@ -90,13 +90,13 @@ var tpl = template.Must(template.New("page").Parse(`
         <button onclick="updateMap()">Show Location</button>
     </div>
 
-    <h2>OR Enter Coordinates (lat,lon)</h2>
+    <h2>or Enter Coordinates (lat,lon)</h2>
     <div class="input-container">
         <input type="text" id="coord" placeholder="e.g. 12.34,56.78">
         <button onclick="updateMapFromText()">Find Location</button>
     </div>
 
-    <h2>OR Find Your Current Location</h2>
+    <h2>or Find Your Current Location</h2>
     <div class="input-container">
         <button onclick="findMyLocation()">Find Me</button>
     </div>
@@ -212,7 +212,7 @@ var tpl = template.Must(template.New("page").Parse(`
                         // Update map and marker
                         map.setView([newLat, newLon], 13);
                         marker.setLatLng([newLat, newLon])
-                            .bindPopup("Your Location: " + newLat.toFixed(6) + ", " + newLon.toFixed(6))
+                            .bindPopup("Your Location: " + newLat.toFixed(6) + "," + newLon.toFixed(6))
                             .openPopup();
                     },
                     function(error) {

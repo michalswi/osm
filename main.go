@@ -8,11 +8,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
-	"sync"
 
 	"github.com/michalswi/osm/server"
 )
@@ -46,8 +47,11 @@ type ClientLocation struct {
 }
 
 var logMutex sync.Mutex
+var logPath string
 
 func main() {
+	logDir := getEnv("LOG_DIR", "data")
+	logPath = logDirCreation(logDir)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", oms)
@@ -64,6 +68,19 @@ func main() {
 	}()
 
 	gracefulShutdown(srv)
+}
+
+func logDirCreation(logDir string) string {
+	basePath := "/tmp/"
+	fullFilePath := filepath.Join(basePath, logDir)
+	filepath.Dir(fullFilePath)
+	if _, err := os.Stat(fullFilePath); os.IsNotExist(err) {
+		err = os.MkdirAll(fullFilePath, 0755)
+		if err != nil {
+			logger.Fatalf("Log directory creation error: %v", err)
+		}
+	}
+	return fullFilePath
 }
 
 func gracefulShutdown(srv *http.Server) {
@@ -190,7 +207,7 @@ func logRequestDetails(r *http.Request) {
 
 	// read the existing file
 	var requests []Request
-	data, err := os.ReadFile("requests.log")
+	data, err := os.ReadFile(logPath + "/" + "requests.log")
 	if err != nil {
 		if !os.IsNotExist(err) {
 			logger.Println("Error reading requests.log:", err)
@@ -220,7 +237,7 @@ func logRequestDetails(r *http.Request) {
 		return
 	}
 
-	err = os.WriteFile("requests.log", updatedData, 0644)
+	err = os.WriteFile(logPath+"/"+"requests.log", updatedData, 0644)
 	if err != nil {
 		logger.Println("Error writing to requests.log:", err)
 		return
