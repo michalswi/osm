@@ -2,10 +2,11 @@ package main
 
 import (
 	"log"
+	"os"
 	"text/template"
 )
 
-var logger = log.New(log.Writer(), "osm: ", log.LstdFlags|log.Lshortfile)
+var logger = log.New(os.Stdout, "osm: ", log.LstdFlags|log.Lshortfile)
 
 var port = getEnv("SERVER_PORT", "5050")
 
@@ -58,7 +59,7 @@ var tpl = template.Must(template.New("page").Parse(`
         }
         select { 
             padding: 8px; 
-            margin: 5px; 
+            margin: 15px; 
             transition: background-color 0.3s, color 0.3s, border 0.3s; 
         }
         button { 
@@ -89,13 +90,13 @@ var tpl = template.Must(template.New("page").Parse(`
         <button onclick="updateMap()">Show Location</button>
     </div>
 
-    <h2>OR Enter Coordinates (lat,lon)</h2>
+    <h2>or Enter Coordinates (lat,lon)</h2>
     <div class="input-container">
         <input type="text" id="coord" placeholder="e.g. 12.34,56.78">
         <button onclick="updateMapFromText()">Find Location</button>
     </div>
 
-    <h2>OR Find Your Current Location</h2>
+    <h2>or Find Your Current Location</h2>
     <div class="input-container">
         <button onclick="findMyLocation()">Find Me</button>
     </div>
@@ -139,6 +140,13 @@ var tpl = template.Must(template.New("page").Parse(`
         var marker = L.marker([lat, lon], { draggable: true }).addTo(map)
             .bindPopup("Default Location")
             .openPopup();
+
+        // Add pins from locations.json
+        var locations = {{.LocationsJSON}};
+        locations.forEach(function(location) {
+            L.marker([location.lat, location.lon]).addTo(map)
+                .bindPopup("as: " + location.as + "<br>asname: " + location.asname);
+        });
 
         function updateMap() {
             var newLat = parseFloat(document.getElementById('lat').value);
@@ -204,7 +212,7 @@ var tpl = template.Must(template.New("page").Parse(`
                         // Update map and marker
                         map.setView([newLat, newLon], 13);
                         marker.setLatLng([newLat, newLon])
-                            .bindPopup("Your Location: " + newLat.toFixed(6) + ", " + newLon.toFixed(6))
+                            .bindPopup("Your Location: " + newLat.toFixed(6) + "," + newLon.toFixed(6))
                             .openPopup();
                     },
                     function(error) {
@@ -277,11 +285,12 @@ var tpl = template.Must(template.New("page").Parse(`
             }
         }
     </script>
-	<div class="container">
+    <div class="container">
       <hr/>
       <p>
-        Copyright &copy; 2049
+        Copyright © 2049
         michalswi<br>
+      </p>
     </div>
 </body>
 </html>

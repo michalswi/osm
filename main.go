@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,7 +22,7 @@ import (
 // It allows users to search for places, enter coordinates, and find their current location.
 // The map can be displayed in different styles (street, satellite, dark).
 
-type request struct {
+type Request struct {
 	Timestamp     string `json:"timestamp"`
 	Method        string `json:"method"`
 	Path          string `json:"path"`
@@ -29,7 +33,25 @@ type request struct {
 	Referer       string `json:"referer"`
 }
 
+type Location struct {
+	Location string `json:"location"`
+	As       string `json:"as"`
+	Asname   string `json:"asname"`
+}
+
+type ClientLocation struct {
+	Lat    float64 `json:"lat"`
+	Lon    float64 `json:"lon"`
+	As     string  `json:"as"`
+	Asname string  `json:"asname"`
+}
+
+var logMutex sync.Mutex
+var logPath string
+
 func main() {
+	logDir := getEnv("LOG_DIR", "data")
+	logPath = logDirCreation(logDir)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", oms)
@@ -46,6 +68,19 @@ func main() {
 	}()
 
 	gracefulShutdown(srv)
+}
+
+func logDirCreation(logDir string) string {
+	basePath := "/tmp/"
+	fullFilePath := filepath.Join(basePath, logDir)
+	filepath.Dir(fullFilePath)
+	if _, err := os.Stat(fullFilePath); os.IsNotExist(err) {
+		err = os.MkdirAll(fullFilePath, 0755)
+		if err != nil {
+			logger.Fatalf("Log directory creation error: %v", err)
+		}
+	}
+	return fullFilePath
 }
 
 func gracefulShutdown(srv *http.Server) {
@@ -82,14 +117,29 @@ func robots(w http.ResponseWriter, r *http.Request) {
 }
 
 func oms(w http.ResponseWriter, r *http.Request) {
-
 	w.Header().Set("Content-Type", "text/html")
 
 	// Default coordinates (Wroclaw, Poland)
 	lat := "51.109970"
 	lon := "17.031984"
 
-	// Check URL query parameters and validate input (xss)
+	// Read locations from file
+	locations, err := readLocations()
+	if err != nil {
+		logger.Printf("Failed to read locations: %v", err)
+		// Don't fail the request; proceed with default map
+		locations = []ClientLocation{}
+	}
+
+	// Convert locations to JSON for the template
+	locationsJSON, err := json.Marshal(locations)
+	if err != nil {
+		logger.Printf("Failed to marshal locations: %v", err)
+		http.Error(w, "Failed to marshal locations", http.StatusInternalServerError)
+		return
+	}
+
+	// Check URL query parameters and validate input
 	if r.URL.Query().Has("lat") && r.URL.Query().Has("lon") {
 		latParam := r.URL.Query().Get("lat")
 		lonParam := r.URL.Query().Get("lon")
@@ -106,15 +156,18 @@ func oms(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := struct {
-		Lat string
-		Lon string
+		Lat           string
+		Lon           string
+		LocationsJSON template.JS
 	}{
-		Lat: lat,
-		Lon: lon,
+		Lat:           lat,
+		Lon:           lon,
+		LocationsJSON: template.JS(locationsJSON),
 	}
 
 	if err := tpl.Execute(w, data); err != nil {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
 	}
 
 	logRequestDetails(r)
@@ -129,7 +182,7 @@ func logRequestDetails(r *http.Request) {
 	}
 	ref := r.Header.Get("Referer")
 
-	datas := &request{
+	datas := &Request{
 		Timestamp:     time.Now().UTC().Format(time.RFC3339),
 		Method:        r.Method,
 		Path:          r.URL.Path,
@@ -140,10 +193,111 @@ func logRequestDetails(r *http.Request) {
 		Referer:       ref,
 	}
 
+	// Log to console
 	b, err := json.Marshal(datas)
 	if err != nil {
 		logger.Println("Error marshalling JSON:", err)
 		return
 	}
 	logger.Printf("%s", b)
+
+	// Log to JSON file as a single array
+	logMutex.Lock()
+	defer logMutex.Unlock()
+
+	// read the existing file
+	var requests []Request
+	data, err := os.ReadFile(logPath + "/" + "requests.log")
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logger.Println("Error reading requests.log:", err)
+			return
+		}
+		// if the file doesn't exist, initialize an empty array
+		requests = []Request{}
+	} else {
+		// if the file exists, unmarshal its contents
+		if len(data) > 0 {
+			err = json.Unmarshal(data, &requests)
+			if err != nil {
+				logger.Println("Error unmarshaling requests.log:", err)
+				return
+			}
+		} else {
+			// if the file is empty, initialize an empty array
+			requests = []Request{}
+		}
+	}
+
+	requests = append(requests, *datas)
+
+	updatedData, err := json.MarshalIndent(requests, "", "    ")
+	if err != nil {
+		logger.Println("Error marshaling updated requests:", err)
+		return
+	}
+
+	err = os.WriteFile(logPath+"/"+"requests.log", updatedData, 0644)
+	if err != nil {
+		logger.Println("Error writing to requests.log:", err)
+		return
+	}
+}
+
+// parseLocationString splits a "latitude,longitude" string into floats
+func parseLocationString(locStr string) (lat, lon float64, err error) {
+	parts := strings.Split(locStr, ",")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid location format: %s", locStr)
+	}
+
+	lat, err = strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid latitude: %s", parts[0])
+	}
+	if lat < -90 || lat > 90 {
+		return 0, 0, fmt.Errorf("latitude out of range: %f", lat)
+	}
+
+	lon, err = strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid longitude: %s", parts[1])
+	}
+	if lon < -180 || lon > 180 {
+		return 0, 0, fmt.Errorf("longitude out of range: %f", lon)
+	}
+
+	return lat, lon, nil
+}
+
+// readLocations reads the locations from the JSON file and converts them to ClientLocation
+func readLocations() ([]ClientLocation, error) {
+	data, err := os.ReadFile("locations.json")
+	if err != nil {
+		return nil, err
+	}
+
+	var locations []Location
+	err = json.Unmarshal(data, &locations)
+	if err != nil {
+		return nil, err
+	}
+
+	var clientLocations []ClientLocation
+	for _, loc := range locations {
+		lat, lon, err := parseLocationString(loc.Location)
+		if err != nil {
+			logger.Printf("Skipping invalid location: %v", err)
+			continue
+		}
+
+		clientLocations = append(clientLocations, ClientLocation{
+			Lat:    lat,
+			Lon:    lon,
+			As:     loc.As,
+			Asname: loc.Asname,
+		})
+	}
+
+	return clientLocations, nil
 }
