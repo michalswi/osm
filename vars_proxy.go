@@ -1,18 +1,10 @@
 package main
 
 import (
-	"log"
-	"os"
 	"text/template"
-
-	"github.com/michalswi/osm/utils"
 )
 
-var logger = log.New(os.Stdout, "osm: ", log.LstdFlags|log.Lshortfile)
-
-var port = utils.GetEnv("SERVER_PORT", "5050")
-
-var tpl = template.Must(template.New("page").Parse(`
+var tpl_proxy = template.Must(template.New("page").Parse(`
 <!DOCTYPE html>
 <html>
 <head>
@@ -124,17 +116,17 @@ var tpl = template.Must(template.New("page").Parse(`
             zoomControl: true // Enable zoom controls
         }).setView([lat, lon], 13);
 
-        var lightTiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-        });
+		var lightTiles = L.tileLayer('/proxy/tiles/osm/{z}/{x}/{y}.png', {
+			attribution: '© OpenStreetMap contributors'
+		});
 
-        var satelliteTiles = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
-            attribution: '© Google Maps'
-        });
+		var satelliteTiles = L.tileLayer('/proxy/tiles/google/{z}/{x}/{y}', {
+			attribution: '© Google Maps'
+		});
 
-        var darkTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '© OpenStreetMap contributors © CARTO'
-        });
+		var darkTiles = L.tileLayer('/proxy/tiles/carto/{z}/{x}/{y}.png', {
+			attribution: '© OpenStreetMap contributors © CARTO'
+		});
 
         var currentTiles = lightTiles; // Default to street map
         currentTiles.addTo(map);
@@ -234,7 +226,7 @@ var tpl = template.Must(template.New("page").Parse(`
                 return;
             }
 
-            fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(query))
+            fetch('/proxy/nominatim?q=' + encodeURIComponent(query))
                 .then(response => response.json())
                 .then(data => {
                     if (data.length > 0) {
