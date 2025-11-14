@@ -19,3 +19,8 @@ go run .
 ### \# known locations
 
 OSM reads locations from [here](./locations.json). Once server is up and running they are visible (pins) on the map.
+
+
+### \# logger
+
+Logs (http requests) are kept by default in **/tmp/data/requests.log**
