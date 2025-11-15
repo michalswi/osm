@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
+	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,9 +19,11 @@ import (
 	"time"
 
 	"github.com/michalswi/osm/server"
+	"github.com/michalswi/osm/utils"
+	"golang.org/x/net/proxy"
 )
 
-// This is a simple web server that serves a map page using Leaflet.js and OpenStreetMap.
+// This is a simple web server that serves a map page using Leaflet.js, OpenStreetMap and Google Maps.
 // It allows users to search for places, enter coordinates, and find their current location.
 // The map can be displayed in different styles (street, satellite, dark).
 
@@ -49,14 +54,99 @@ type ClientLocation struct {
 var logMutex sync.Mutex
 var logPath string
 
+var ProxyClient *http.Client
+var proxyEnabled bool
+
+func initProxy() {
+	proxyStr := os.Getenv("PROXY_ADDR")
+	proxyEnabled = proxyStr != ""
+
+	if !proxyEnabled {
+		log.Println("Proxy disabled - using direct connection")
+		ProxyClient = &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				IdleConnTimeout:     90 * time.Second,
+				TLSHandshakeTimeout: 10 * time.Second,
+				DisableKeepAlives:   false,
+			},
+		}
+		return
+	}
+
+	parsed, err := url.Parse(proxyStr)
+	if err != nil {
+		logger.Fatalf("Invalid PROXY_ADDR: %v", err)
+	}
+
+	// SOCKS5 proxy
+	if parsed.Scheme == "socks5" {
+		var auth *proxy.Auth
+		if parsed.User != nil {
+			password, _ := parsed.User.Password()
+			auth = &proxy.Auth{
+				User:     parsed.User.Username(),
+				Password: password,
+			}
+		}
+
+		dialer, err := proxy.SOCKS5("tcp", parsed.Host, auth, proxy.Direct)
+		if err != nil {
+			logger.Fatalf("SOCKS5 proxy setup failed: %v", err)
+		}
+
+		transport := &http.Transport{
+			Dial:                dialer.Dial,
+			MaxIdleConns:        100,
+			IdleConnTimeout:     90 * time.Second,
+			TLSHandshakeTimeout: 10 * time.Second,
+			DisableKeepAlives:   false,
+			DisableCompression:  false,
+		}
+
+		ProxyClient = &http.Client{
+			Transport: transport,
+			Timeout:   30 * time.Second,
+		}
+		logger.Println("SOCKS5 proxy enabled:", proxyStr)
+		return
+	}
+
+	// HTTP/HTTPS proxy
+	transport := &http.Transport{
+		Proxy:               http.ProxyURL(parsed),
+		MaxIdleConns:        100,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 10 * time.Second,
+		DisableKeepAlives:   false,
+		DisableCompression:  false,
+	}
+
+	ProxyClient = &http.Client{
+		Transport: transport,
+		Timeout:   30 * time.Second,
+	}
+
+	logger.Println("HTTP/HTTPS proxy enabled:", proxyStr)
+}
+
 func main() {
-	logDir := getEnv("LOG_DIR", "data")
+	initProxy()
+
+	logDir := utils.GetEnv("LOG_DIR", "data")
 	logPath = logDirCreation(logDir)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", oms)
 	mux.HandleFunc("/hz", hz)
 	mux.HandleFunc("/robots.txt", robots)
+
+	if proxyEnabled {
+		mux.HandleFunc("/proxy/tiles/", proxyTiles)
+		mux.HandleFunc("/proxy/nominatim", proxyNominatim)
+		logger.Println("Proxy endpoints enabled")
+	}
 
 	srv := server.NewServer(mux, port)
 
@@ -97,14 +187,6 @@ func gracefulShutdown(srv *http.Server) {
 	logger.Println("Server stopped.")
 }
 
-func getEnv(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if len(value) == 0 {
-		return defaultValue
-	}
-	return value
-}
-
 func hz(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
@@ -119,19 +201,17 @@ func robots(w http.ResponseWriter, r *http.Request) {
 func oms(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 
-	// Default coordinates (Wroclaw, Poland)
+	// default coordinates (Wroclaw, Poland)
 	lat := "51.109970"
 	lon := "17.031984"
 
-	// Read locations from file
+	// read locations from file
 	locations, err := readLocations()
 	if err != nil {
 		logger.Printf("Failed to read locations: %v", err)
-		// Don't fail the request; proceed with default map
 		locations = []ClientLocation{}
 	}
 
-	// Convert locations to JSON for the template
 	locationsJSON, err := json.Marshal(locations)
 	if err != nil {
 		logger.Printf("Failed to marshal locations: %v", err)
@@ -139,7 +219,6 @@ func oms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check URL query parameters and validate input
 	if r.URL.Query().Has("lat") && r.URL.Query().Has("lon") {
 		latParam := r.URL.Query().Get("lat")
 		lonParam := r.URL.Query().Get("lon")
@@ -165,9 +244,15 @@ func oms(w http.ResponseWriter, r *http.Request) {
 		LocationsJSON: template.JS(locationsJSON),
 	}
 
-	if err := tpl.Execute(w, data); err != nil {
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	if proxyEnabled {
+		if err := tpl_proxy.Execute(w, data); err != nil {
+			http.Error(w, "Internal Error", 500)
+		}
 		return
+	}
+
+	if err := tpl.Execute(w, data); err != nil {
+		http.Error(w, "Internal Error", 500)
 	}
 
 	logRequestDetails(r)
@@ -193,7 +278,6 @@ func logRequestDetails(r *http.Request) {
 		Referer:       ref,
 	}
 
-	// Log to console
 	b, err := json.Marshal(datas)
 	if err != nil {
 		logger.Println("Error marshalling JSON:", err)
@@ -201,11 +285,9 @@ func logRequestDetails(r *http.Request) {
 	}
 	logger.Printf("%s", b)
 
-	// Log to JSON file as a single array
 	logMutex.Lock()
 	defer logMutex.Unlock()
 
-	// read the existing file
 	var requests []Request
 	data, err := os.ReadFile(logPath + "/" + "requests.log")
 	if err != nil {
@@ -213,10 +295,8 @@ func logRequestDetails(r *http.Request) {
 			logger.Println("Error reading requests.log:", err)
 			return
 		}
-		// if the file doesn't exist, initialize an empty array
 		requests = []Request{}
 	} else {
-		// if the file exists, unmarshal its contents
 		if len(data) > 0 {
 			err = json.Unmarshal(data, &requests)
 			if err != nil {
@@ -224,7 +304,6 @@ func logRequestDetails(r *http.Request) {
 				return
 			}
 		} else {
-			// if the file is empty, initialize an empty array
 			requests = []Request{}
 		}
 	}
@@ -300,4 +379,123 @@ func readLocations() ([]ClientLocation, error) {
 	}
 
 	return clientLocations, nil
+}
+
+func proxyTiles(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/proxy/tiles/")
+
+	var tileURL string
+	if strings.HasPrefix(path, "osm/") {
+		// extract z/x/y.png from osm/13/4486/2739.png
+		tilePath := strings.TrimPrefix(path, "osm/")
+		tileURL = fmt.Sprintf("https://a.tile.openstreetmap.org/%s", tilePath)
+	} else if strings.HasPrefix(path, "google/") {
+		// extract coordinates and construct Google tiles URL
+		tilePath := strings.TrimPrefix(path, "google/")
+		// google uses different URL format: lyrs=s&x={x}&y={y}&z={z}
+		// parse z/x/y from the path
+		parts := strings.Split(strings.TrimSuffix(tilePath, ".png"), "/")
+		if len(parts) == 3 {
+			tileURL = fmt.Sprintf("https://mt1.google.com/vt/lyrs=s&x=%s&y=%s&z=%s", parts[1], parts[2], parts[0])
+		} else {
+			http.Error(w, "Invalid Google tile path", http.StatusBadRequest)
+			return
+		}
+	} else if strings.HasPrefix(path, "carto/") {
+		// extract z/x/y.png from carto/13/4486/2739.png
+		tilePath := strings.TrimPrefix(path, "carto/")
+		tileURL = fmt.Sprintf("https://a.basemaps.cartocdn.com/dark_all/%s", tilePath)
+	} else {
+		http.Error(w, "Invalid tile source", http.StatusBadRequest)
+		return
+	}
+
+	req, err := http.NewRequest("GET", tileURL, nil)
+	if err != nil {
+		logger.Printf("Error creating request: %v", err)
+		http.Error(w, "Failed to create request", http.StatusInternalServerError)
+		return
+	}
+
+	req.Header.Set("User-Agent", "OSM-Proxy-App/1.0")
+
+	if referer := r.Header.Get("Referer"); referer != "" {
+		req.Header.Set("Referer", referer)
+	}
+
+	var resp *http.Response
+	maxRetries := 3
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		resp, err = ProxyClient.Do(req)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			break
+		}
+
+		if err != nil {
+			logger.Printf("Attempt %d/%d - Error fetching tile %s: %v", attempt, maxRetries, tileURL, err)
+		} else if resp != nil {
+			logger.Printf("Attempt %d/%d - Tile server returned status %d for %s", attempt, maxRetries, resp.StatusCode, tileURL)
+			resp.Body.Close()
+		}
+
+		if attempt < maxRetries {
+			time.Sleep(time.Duration(attempt) * 200 * time.Millisecond)
+		}
+	}
+
+	if err != nil {
+		logger.Printf("Failed to fetch tile after %d attempts: %v", maxRetries, err)
+		http.Error(w, "Failed to fetch tile", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		logger.Printf("Tile server returned status %d for %s", resp.StatusCode, tileURL)
+		http.Error(w, "Tile not available", resp.StatusCode)
+		return
+	}
+
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+
+	if contentLength := resp.Header.Get("Content-Length"); contentLength != "" {
+		w.Header().Set("Content-Length", contentLength)
+	}
+
+	w.WriteHeader(resp.StatusCode)
+
+	written, err := io.Copy(w, resp.Body)
+	if err != nil {
+		logger.Printf("Error copying tile response (wrote %d bytes): %v", written, err)
+		return
+	}
+
+	logRequestDetails(r)
+}
+
+func proxyNominatim(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		http.Error(w, "Missing query parameter", http.StatusBadRequest)
+		return
+	}
+
+	nominatimURL := fmt.Sprintf("https://nominatim.openstreetmap.org/search?format=json&q=%s",
+		url.QueryEscape(query))
+
+	resp, err := ProxyClient.Get(nominatimURL)
+	if err != nil {
+		logger.Printf("Error fetching from Nominatim: %v", err)
+		http.Error(w, "Failed to search location", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+
+	logRequestDetails(r)
 }
