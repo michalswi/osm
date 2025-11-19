@@ -138,8 +138,12 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
         // Add pins from locations.json
         var locations = {{.LocationsJSON}};
         locations.forEach(function(location) {
+            var detailsHTML = location.details;
+            if (/^https?:\/\//i.test(detailsHTML)) {
+                detailsHTML = '<a href="' + detailsHTML + '" target="_blank" rel="noopener">' + detailsHTML + '</a>';
+            }
             L.marker([location.lat, location.lon]).addTo(map)
-                .bindPopup("as: " + location.as + "<br>asname: " + location.asname + "<br>details: " + location.details);
+                .bindPopup("as: " + location.as + "<br>asname: " + location.asname + "<br>details: " + detailsHTML);
         });
 
         var dynamicMarkers = [];
@@ -147,19 +151,25 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
             dynamicMarkers.forEach(m => map.removeLayer(m));
             dynamicMarkers = [];
         }
+
         function refreshLocations() {
             fetch('/api/locations')
               .then(r => r.json())
               .then(list => {
                   clearDynamicMarkers();
                   list.forEach(function(location) {
+                      var detailsHTML = location.details;
+                      if (/^https?:\/\//i.test(detailsHTML)) {
+                          detailsHTML = '<a href="' + detailsHTML + '" target="_blank" rel="noopener">' + detailsHTML + '</a>';
+                      }
                       var m = L.marker([location.lat, location.lon]).addTo(map)
-                        .bindPopup("as: " + location.as + "<br>asname: " + location.asname + "<br>details: " + location.details);
+                        .bindPopup("as: " + location.as + "<br>asname: " + location.asname + "<br>details: " + detailsHTML);
                       dynamicMarkers.push(m);
                   });
               })
               .catch(err => console.log('locations refresh error', err));
         }
+
         // initial async refresh (optional overrides embedded set)
         setInterval(refreshLocations, 10000); // every 10s
 
