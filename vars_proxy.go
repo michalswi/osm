@@ -139,8 +139,29 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
         var locations = {{.LocationsJSON}};
         locations.forEach(function(location) {
             L.marker([location.lat, location.lon]).addTo(map)
-                .bindPopup("as: " + location.as + "<br>asname: " + location.asname);
+                .bindPopup("as: " + location.as + "<br>asname: " + location.asname + "<br>details: " + location.details);
         });
+
+        var dynamicMarkers = [];
+        function clearDynamicMarkers() {
+            dynamicMarkers.forEach(m => map.removeLayer(m));
+            dynamicMarkers = [];
+        }
+        function refreshLocations() {
+            fetch('/api/locations')
+              .then(r => r.json())
+              .then(list => {
+                  clearDynamicMarkers();
+                  list.forEach(function(location) {
+                      var m = L.marker([location.lat, location.lon]).addTo(map)
+                        .bindPopup("as: " + location.as + "<br>asname: " + location.asname + "<br>details: " + location.details);
+                      dynamicMarkers.push(m);
+                  });
+              })
+              .catch(err => console.log('locations refresh error', err));
+        }
+        // initial async refresh (optional overrides embedded set)
+        setInterval(refreshLocations, 10000); // every 10s
 
         function updateMap() {
             var newLat = parseFloat(document.getElementById('lat').value);

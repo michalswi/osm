@@ -42,20 +42,28 @@ type Location struct {
 	Location string `json:"location"`
 	As       string `json:"as"`
 	Asname   string `json:"asname"`
+	Details  string `json:"details"`
 }
 
 type ClientLocation struct {
-	Lat    float64 `json:"lat"`
-	Lon    float64 `json:"lon"`
-	As     string  `json:"as"`
-	Asname string  `json:"asname"`
+	Lat     float64 `json:"lat"`
+	Lon     float64 `json:"lon"`
+	As      string  `json:"as"`
+	Asname  string  `json:"asname"`
+	Details string  `json:"details"`
 }
 
-var logMutex sync.Mutex
-var logPath string
+var (
+	logMutex     sync.Mutex
+	logPath      string
+	ProxyClient  *http.Client
+	proxyEnabled bool
 
-var ProxyClient *http.Client
-var proxyEnabled bool
+	locationsCache      []ClientLocation
+	locationsCacheMu    sync.RWMutex
+	locationsCacheTTL   = 3 * time.Second
+	locationsCacheStamp time.Time
+)
 
 func initProxy() {
 	proxyStr := os.Getenv("PROXY_ADDR")
@@ -141,6 +149,7 @@ func main() {
 	mux.HandleFunc("/", oms)
 	mux.HandleFunc("/hz", hz)
 	mux.HandleFunc("/robots.txt", robots)
+	mux.HandleFunc("/api/locations", apiLocations)
 
 	if proxyEnabled {
 		mux.HandleFunc("/proxy/tiles/", proxyTiles)
@@ -158,6 +167,16 @@ func main() {
 	}()
 
 	gracefulShutdown(srv)
+}
+
+// todo - review
+func apiLocations(w http.ResponseWriter, r *http.Request) {
+	locs := getCachedLocations()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(locs); err != nil {
+		http.Error(w, "encode error", 500)
+		return
+	}
 }
 
 func logDirCreation(logDir string) string {
@@ -198,6 +217,29 @@ func robots(w http.ResponseWriter, r *http.Request) {
 	logRequestDetails(r)
 }
 
+// todo - review
+func getCachedLocations() []ClientLocation {
+	locationsCacheMu.RLock()
+	fresh := time.Since(locationsCacheStamp) < locationsCacheTTL
+	if fresh && locationsCache != nil {
+		defer locationsCacheMu.RUnlock()
+		return locationsCache
+	}
+	locationsCacheMu.RUnlock()
+
+	locs, err := readLocations()
+	if err != nil {
+		logger.Printf("Failed to read locations: %v", err)
+		locs = []ClientLocation{}
+	}
+
+	locationsCacheMu.Lock()
+	locationsCache = locs
+	locationsCacheStamp = time.Now()
+	locationsCacheMu.Unlock()
+	return locs
+}
+
 func oms(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 
@@ -206,11 +248,7 @@ func oms(w http.ResponseWriter, r *http.Request) {
 	lon := "17.031984"
 
 	// read locations from file
-	locations, err := readLocations()
-	if err != nil {
-		logger.Printf("Failed to read locations: %v", err)
-		locations = []ClientLocation{}
-	}
+	locations := getCachedLocations()
 
 	locationsJSON, err := json.Marshal(locations)
 	if err != nil {
@@ -371,10 +409,11 @@ func readLocations() ([]ClientLocation, error) {
 		}
 
 		clientLocations = append(clientLocations, ClientLocation{
-			Lat:    lat,
-			Lon:    lon,
-			As:     loc.As,
-			Asname: loc.Asname,
+			Lat:     lat,
+			Lon:     lon,
+			As:      loc.As,
+			Asname:  loc.Asname,
+			Details: loc.Details,
 		})
 	}
 

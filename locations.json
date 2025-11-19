@@ -2,11 +2,19 @@
     {
         "location": "52.2298,21.0118",
         "as": "AS8535",
-        "asname": "AGORA"
+        "asname": "AGORA",
+        "details": "https://bgp.he.net/AS8535#_whois"
     },
     {
         "location": "51.0859,17.0486",
         "as": "AS49242",
-        "asname": "INTERNETUNION1"
+        "asname": "INTERNETUNION1",
+        "details": "https://bgp.he.net/AS49242#_whois"
+    },
+    {
+        "location": "51.0587,17.0119",
+        "as": "AS49743",
+        "asname": "FINEMEDIA",
+        "details": "https://bgp.he.net/AS49743#_whois"
     }
 ]
