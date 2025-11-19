@@ -169,7 +169,6 @@ func main() {
 	gracefulShutdown(srv)
 }
 
-// todo - review
 func apiLocations(w http.ResponseWriter, r *http.Request) {
 	locs := getCachedLocations()
 	w.Header().Set("Content-Type", "application/json")
@@ -217,7 +216,6 @@ func robots(w http.ResponseWriter, r *http.Request) {
 	logRequestDetails(r)
 }
 
-// todo - review
 func getCachedLocations() []ClientLocation {
 	locationsCacheMu.RLock()
 	fresh := time.Since(locationsCacheStamp) < locationsCacheTTL
