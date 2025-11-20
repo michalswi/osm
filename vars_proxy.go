@@ -61,15 +61,59 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
             cursor: pointer; 
             transition: background-color 0.3s, color 0.3s, border 0.3s; 
         }
-        #theme-toggle { 
-            position: absolute; 
-            top: 10px; 
-            right: 10px; 
+       #theme-toggle { 
+            /* remove absolute positioning from individual buttons */
+            position: relative;
         }
+        #github-btn {
+            position: relative;
+            padding: 8px;
+            cursor: pointer;
+            background: none;
+            border: 1px solid #777;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        #github-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+        #top-buttons {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 500;
+        }        
     </style>
 </head>
 <body class="light">
-    <button id="theme-toggle" onclick="toggleTheme()">🌙 Dark Mode</button>
+
+    <div id="top-buttons">
+        <button id="theme-toggle" onclick="toggleTheme()">🌙 Dark Mode</button>
+        <button id="github-btn" onclick="window.open('https://github.com/michalswi/osm','_blank','noopener')">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                 stroke-linejoin="round" class="feather feather-github">
+                <path d="M9 19c-5 1.5-5-2.5-7-3
+                         M17 22v-3.87a3.37 3.37 0 0 0-.94-2.61
+                         c3.14-.35 6.44-1.54 6.44-7
+                         A5.44 5.44 0 0 0 20 4.77
+                         A5.07 5.07 0 0 0 19.91 1
+                         S18.73.65 16 2.48
+                         a13.38 13.38 0 0 0-7 0
+                         C6.27.65 5.09 1 5.09 1
+                         A5.07 5.07 0 0 0 5 4.77
+                         A5.44 5.44 0 0 0 3.5 8.55
+                         c0 5.42 3.3 6.61 6.44 7
+                         A3.37 3.37 0 0 0 9 18.13V22"/>
+            </svg>
+            GitHub
+        </button>        
+    </div>
 
     <h2>Search for a Place</h2>
     <div class="input-container">
@@ -138,9 +182,40 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
         // Add pins from locations.json
         var locations = {{.LocationsJSON}};
         locations.forEach(function(location) {
+            var detailsHTML = location.details;
+            if (/^https?:\/\//i.test(detailsHTML)) {
+                detailsHTML = '<a href="' + detailsHTML + '" target="_blank" rel="noopener">' + detailsHTML + '</a>';
+            }
             L.marker([location.lat, location.lon]).addTo(map)
-                .bindPopup("as: " + location.as + "<br>asname: " + location.asname);
+                .bindPopup("as: " + location.as + "<br>asname: " + location.asname + "<br>details: " + detailsHTML);
         });
+
+        var dynamicMarkers = [];
+        function clearDynamicMarkers() {
+            dynamicMarkers.forEach(m => map.removeLayer(m));
+            dynamicMarkers = [];
+        }
+
+        function refreshLocations() {
+            fetch('/api/locations')
+              .then(r => r.json())
+              .then(list => {
+                  clearDynamicMarkers();
+                  list.forEach(function(location) {
+                      var detailsHTML = location.details;
+                      if (/^https?:\/\//i.test(detailsHTML)) {
+                          detailsHTML = '<a href="' + detailsHTML + '" target="_blank" rel="noopener">' + detailsHTML + '</a>';
+                      }
+                      var m = L.marker([location.lat, location.lon]).addTo(map)
+                        .bindPopup("as: " + location.as + "<br>asname: " + location.asname + "<br>details: " + detailsHTML);
+                      dynamicMarkers.push(m);
+                  });
+              })
+              .catch(err => console.log('locations refresh error', err));
+        }
+
+        // initial async refresh (optional overrides embedded set)
+        setInterval(refreshLocations, 10000); // every 10s
 
         function updateMap() {
             var newLat = parseFloat(document.getElementById('lat').value);

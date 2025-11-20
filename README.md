@@ -1,6 +1,7 @@
 # OpenStreetMap (OSM) coordinates
 
-![alt text](./img/image.png)
+![alt text](./img/part1.png)
+![alt text](./img/part2.png)
 
 
 ### \# proxy
