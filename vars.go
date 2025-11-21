@@ -13,8 +13,11 @@ import (
 
 var logger = log.New(os.Stdout, "osm: ", log.LstdFlags|log.Lshortfile)
 var port = utils.GetEnv("SERVER_PORT", "5050")
+var proxyStr = os.Getenv("PROXY_ADDR")
 
 var (
+	sourceJson = "source/locations.json"
+
 	logMutex     sync.Mutex
 	logPath      string
 	ProxyClient  *http.Client
@@ -222,8 +225,11 @@ var tpl = template.Must(template.New("page").Parse(`
             if (/^https?:\/\//i.test(detailsHTML)) {
                 detailsHTML = '<a href="' + detailsHTML + '" target="_blank" rel="noopener">' + detailsHTML + '</a>';
             }
-            L.marker([location.lat, location.lon]).addTo(map)
+            var m = L.marker([location.lat, location.lon]).addTo(map)
                 .bindPopup("as: " + location.as + "<br>asname: " + location.asname + "<br>details: " + detailsHTML);
+            m.on('click', function() {
+                updateShareURL(location.lat.toFixed(6), location.lon.toFixed(6));
+            });
         });
 
         var dynamicMarkers = [];
@@ -244,6 +250,9 @@ var tpl = template.Must(template.New("page").Parse(`
                       }
                       var m = L.marker([location.lat, location.lon]).addTo(map)
                         .bindPopup("as: " + location.as + "<br>asname: " + location.asname + "<br>details: " + detailsHTML);
+                      m.on('click', function() {
+                          updateShareURL(location.lat.toFixed(6), location.lon.toFixed(6));
+                      });
                       dynamicMarkers.push(m);
                   });
               })
