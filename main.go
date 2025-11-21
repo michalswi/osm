@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,7 +17,6 @@ import (
 
 	"github.com/michalswi/osm/server"
 	"github.com/michalswi/osm/utils"
-	"golang.org/x/net/proxy"
 )
 
 // This is a simple web server that serves a map page using Leaflet.js, OpenStreetMap and Google Maps.
@@ -52,84 +49,10 @@ type ClientLocation struct {
 	Details string  `json:"details"`
 }
 
-func initProxy() {
-	proxyStr := os.Getenv("PROXY_ADDR")
-	proxyEnabled = proxyStr != ""
-
-	if !proxyEnabled {
-		log.Println("Proxy disabled - using direct connection")
-		ProxyClient = &http.Client{
-			Timeout: 30 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				IdleConnTimeout:     90 * time.Second,
-				TLSHandshakeTimeout: 10 * time.Second,
-				DisableKeepAlives:   false,
-			},
-		}
-		return
-	}
-
-	parsed, err := url.Parse(proxyStr)
-	if err != nil {
-		logger.Fatalf("Invalid PROXY_ADDR: %v", err)
-	}
-
-	// SOCKS5 proxy
-	if parsed.Scheme == "socks5" {
-		var auth *proxy.Auth
-		if parsed.User != nil {
-			password, _ := parsed.User.Password()
-			auth = &proxy.Auth{
-				User:     parsed.User.Username(),
-				Password: password,
-			}
-		}
-
-		dialer, err := proxy.SOCKS5("tcp", parsed.Host, auth, proxy.Direct)
-		if err != nil {
-			logger.Fatalf("SOCKS5 proxy setup failed: %v", err)
-		}
-
-		transport := &http.Transport{
-			Dial:                dialer.Dial,
-			MaxIdleConns:        100,
-			IdleConnTimeout:     90 * time.Second,
-			TLSHandshakeTimeout: 10 * time.Second,
-			DisableKeepAlives:   false,
-			DisableCompression:  false,
-		}
-
-		ProxyClient = &http.Client{
-			Transport: transport,
-			Timeout:   30 * time.Second,
-		}
-		logger.Println("SOCKS5 proxy enabled:", proxyStr)
-		return
-	}
-
-	// HTTP/HTTPS proxy
-	transport := &http.Transport{
-		Proxy:               http.ProxyURL(parsed),
-		MaxIdleConns:        100,
-		IdleConnTimeout:     90 * time.Second,
-		TLSHandshakeTimeout: 10 * time.Second,
-		DisableKeepAlives:   false,
-		DisableCompression:  false,
-	}
-
-	ProxyClient = &http.Client{
-		Transport: transport,
-		Timeout:   30 * time.Second,
-	}
-
-	logger.Println("HTTP/HTTPS proxy enabled:", proxyStr)
-}
-
 func main() {
 	initProxy()
 
-	logDir := utils.GetEnv("LOG_DIR", "data")
+	logDir := utils.GetEnv("LOG_DIR", "oms")
 	logPath = logDirCreation(logDir)
 
 	mux := http.NewServeMux()
@@ -158,6 +81,7 @@ func main() {
 	gracefulShutdown(srv)
 }
 
+// apiLocations returns the current (possibly cached) list of client locations as JSON.
 func apiLocations(w http.ResponseWriter, r *http.Request) {
 	locs := getCachedLocations()
 	w.Header().Set("Content-Type", "application/json")
@@ -167,6 +91,7 @@ func apiLocations(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// logDirCreation ensures the log directory exists under /tmp and returns its full path.
 func logDirCreation(logDir string) string {
 	basePath := "/tmp/"
 	fullFilePath := filepath.Join(basePath, logDir)
@@ -180,6 +105,7 @@ func logDirCreation(logDir string) string {
 	return fullFilePath
 }
 
+// gracefulShutdown blocks until an interrupt/TERM signal arrives, then shuts down the server cleanly.
 func gracefulShutdown(srv *http.Server) {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -194,95 +120,20 @@ func gracefulShutdown(srv *http.Server) {
 	logger.Println("Server stopped.")
 }
 
+// hz is a health check endpoint returning 200 OK and logging the request.
 func hz(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
 	logRequestDetails(r)
 }
 
+// robots serves robots.txt and logs the request.
 func robots(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "./robots.txt")
 	logRequestDetails(r)
 }
 
-func getCachedLocations() []ClientLocation {
-	locationsCacheMu.RLock()
-	fresh := time.Since(locationsCacheStamp) < locationsCacheTTL
-	if fresh && locationsCache != nil {
-		defer locationsCacheMu.RUnlock()
-		return locationsCache
-	}
-	locationsCacheMu.RUnlock()
-
-	locs, err := readLocations()
-	if err != nil {
-		logger.Printf("Failed to read locations: %v", err)
-		locs = []ClientLocation{}
-	}
-
-	locationsCacheMu.Lock()
-	locationsCache = locs
-	locationsCacheStamp = time.Now()
-	locationsCacheMu.Unlock()
-	return locs
-}
-
-func oms(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html")
-
-	// default coordinates (Wroclaw, Poland)
-	lat := "51.109970"
-	lon := "17.031984"
-
-	// read locations from file
-	locations := getCachedLocations()
-
-	locationsJSON, err := json.Marshal(locations)
-	if err != nil {
-		logger.Printf("Failed to marshal locations: %v", err)
-		http.Error(w, "Failed to marshal locations", http.StatusInternalServerError)
-		return
-	}
-
-	if r.URL.Query().Has("lat") && r.URL.Query().Has("lon") {
-		latParam := r.URL.Query().Get("lat")
-		lonParam := r.URL.Query().Get("lon")
-		if parsedLat, err := strconv.ParseFloat(latParam, 64); err == nil {
-			lat = fmt.Sprintf("%f", parsedLat)
-		} else {
-			logger.Println("Invalid latitude value:", latParam)
-		}
-		if parsedLon, err := strconv.ParseFloat(lonParam, 64); err == nil {
-			lon = fmt.Sprintf("%f", parsedLon)
-		} else {
-			logger.Println("Invalid longitude value:", lonParam)
-		}
-	}
-
-	data := struct {
-		Lat           string
-		Lon           string
-		LocationsJSON template.JS
-	}{
-		Lat:           lat,
-		Lon:           lon,
-		LocationsJSON: template.JS(locationsJSON),
-	}
-
-	if proxyEnabled {
-		if err := tpl_proxy.Execute(w, data); err != nil {
-			http.Error(w, "Internal Error", 500)
-		}
-		return
-	}
-
-	if err := tpl.Execute(w, data); err != nil {
-		http.Error(w, "Internal Error", 500)
-	}
-
-	logRequestDetails(r)
-}
-
+// logRequestDetails captures request metadata and appends it to requests.log atomically.
 func logRequestDetails(r *http.Request) {
 	ua := r.Header.Get("User-Agent")
 	ra := r.RemoteAddr
@@ -348,7 +199,7 @@ func logRequestDetails(r *http.Request) {
 	}
 }
 
-// parseLocationString splits a "latitude,longitude" string into floats
+// parseLocationString splits a "latitude,longitude" string into floats with validation.
 func parseLocationString(locStr string) (lat, lon float64, err error) {
 	parts := strings.Split(locStr, ",")
 	if len(parts) != 2 {
@@ -374,9 +225,9 @@ func parseLocationString(locStr string) (lat, lon float64, err error) {
 	return lat, lon, nil
 }
 
-// readLocations reads the locations from the JSON file and converts them to ClientLocation
+// readLocations loads locations.json, validates coordinates, and converts to ClientLocation slice.
 func readLocations() ([]ClientLocation, error) {
-	data, err := os.ReadFile("locations.json")
+	data, err := os.ReadFile(sourceJson)
 	if err != nil {
 		return nil, err
 	}
@@ -407,6 +258,7 @@ func readLocations() ([]ClientLocation, error) {
 	return clientLocations, nil
 }
 
+// proxyTiles proxies external tile requests (OSM, Google, Carto) through the configured proxy client.
 func proxyTiles(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/proxy/tiles/")
 
@@ -501,6 +353,7 @@ func proxyTiles(w http.ResponseWriter, r *http.Request) {
 	logRequestDetails(r)
 }
 
+// proxyNominatim proxies a geocoding search query to the Nominatim API through the proxy client.
 func proxyNominatim(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	if query == "" {

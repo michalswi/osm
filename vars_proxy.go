@@ -200,8 +200,11 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
             if (/^https?:\/\//i.test(detailsHTML)) {
                 detailsHTML = '<a href="' + detailsHTML + '" target="_blank" rel="noopener">' + detailsHTML + '</a>';
             }
-            L.marker([location.lat, location.lon]).addTo(map)
+            var m = L.marker([location.lat, location.lon]).addTo(map)
                 .bindPopup("as: " + location.as + "<br>asname: " + location.asname + "<br>details: " + detailsHTML);
+            m.on('click', function() {
+                updateShareURL(location.lat.toFixed(6), location.lon.toFixed(6));
+            });
         });
 
         var dynamicMarkers = [];
@@ -222,6 +225,9 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
                       }
                       var m = L.marker([location.lat, location.lon]).addTo(map)
                         .bindPopup("as: " + location.as + "<br>asname: " + location.asname + "<br>details: " + detailsHTML);
+                      m.on('click', function() {
+                          updateShareURL(location.lat.toFixed(6), location.lon.toFixed(6));
+                      });
                       dynamicMarkers.push(m);
                   });
               })
