@@ -9,6 +9,7 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
 <html>
 <head>
     <title>osm</title>
+    <link rel="icon" href="web/pepe.png" type="image/png" sizes="16x16">
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
@@ -87,7 +88,14 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
             flex-direction: column;
             gap: 8px;
             z-index: 500;
-        }        
+        }
+        #share-box {
+            margin-top: 10px;
+        }
+        #share-url {
+            width: 260px;
+            padding: 6px;
+        }               
     </style>
 </head>
 <body class="light">
@@ -152,6 +160,11 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
 
     <div id="map"></div>
 
+    <div id="share-box">
+        <input id="share-url" readonly placeholder="Click map to get share URL">
+        <button onclick="copyShare()">Copy</button>
+    </div>    
+
     <script>
         var lat = parseFloat("{{.Lat}}");
         var lon = parseFloat("{{.Lon}}");
@@ -178,6 +191,7 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
         var marker = L.marker([lat, lon], { draggable: true }).addTo(map)
             .bindPopup("Default Location")
             .openPopup();
+        updateShareURL(lat, lon)            
 
         // Add pins from locations.json
         var locations = {{.LocationsJSON}};
@@ -264,6 +278,7 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
             marker.setLatLng([clickedLat, clickedLon])
                 .bindPopup("Clicked Location: " + clickedLat + ", " + clickedLon)
                 .openPopup();
+            updateShareURL(clickedLat, clickedLon);
         });
 
         // Find user's current location
@@ -283,6 +298,7 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
                         marker.setLatLng([newLat, newLon])
                             .bindPopup("Your Location: " + newLat.toFixed(6) + "," + newLon.toFixed(6))
                             .openPopup();
+                        updateShareURL(newLat.toFixed(6), newLon.toFixed(6));                            
                     },
                     function(error) {
                         alert("Unable to get your location: " + error.message);
@@ -317,6 +333,7 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
                         marker.setLatLng([newLat, newLon])
                             .bindPopup("Searched Location: " + data[0].display_name)
                             .openPopup();
+                        updateShareURL(newLat.toFixed(6), newLon.toFixed(6));                            
                     } else {
                         alert("Place not found.");
                     }
@@ -353,6 +370,31 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
                 document.getElementById('theme-toggle').innerText = '🌙 Dark Mode';
             }
         }
+
+        function updateMap() {
+            var newLat = parseFloat(document.getElementById('lat').value);
+            var newLon = parseFloat(document.getElementById('lon').value);
+            if (!isNaN(newLat) && !isNaN(newLon)) {
+                map.setView([newLat, newLon], 13);
+                marker.setLatLng([newLat, newLon])
+                    .bindPopup("New Location: " + newLat + ", " + newLon)
+                    .openPopup();
+                updateShareURL(newLat.toFixed(6), newLon.toFixed(6));
+            } else {
+                alert("Please enter valid latitude and longitude values.");
+            }
+        }
+        function updateShareURL(latVal, lonVal) {
+            var url = location.origin + "?lat=" + latVal + "&lon=" + lonVal;
+            document.getElementById('share-url').value = url;
+        }
+
+        function copyShare() {
+            var el = document.getElementById('share-url');
+            if (!el.value) return;
+            navigator.clipboard.writeText(el.value).catch(()=>{});
+        }
+
     </script>
     <div class="container">
       <hr/>
