@@ -9,6 +9,7 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
 <html>
 <head>
     <title>osm</title>
+    <link rel="icon" href="web/pepe.png" type="image/png" sizes="16x16">
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />

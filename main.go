@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -52,18 +51,6 @@ type ClientLocation struct {
 	Asname  string  `json:"asname"`
 	Details string  `json:"details"`
 }
-
-var (
-	logMutex     sync.Mutex
-	logPath      string
-	ProxyClient  *http.Client
-	proxyEnabled bool
-
-	locationsCache      []ClientLocation
-	locationsCacheMu    sync.RWMutex
-	locationsCacheTTL   = 3 * time.Second
-	locationsCacheStamp time.Time
-)
 
 func initProxy() {
 	proxyStr := os.Getenv("PROXY_ADDR")
@@ -150,6 +137,8 @@ func main() {
 	mux.HandleFunc("/hz", hz)
 	mux.HandleFunc("/robots.txt", robots)
 	mux.HandleFunc("/api/locations", apiLocations)
+	mux.Handle("/web/", http.StripPrefix("/web/",
+		http.FileServer(http.Dir("web"))))
 
 	if proxyEnabled {
 		mux.HandleFunc("/proxy/tiles/", proxyTiles)

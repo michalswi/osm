@@ -2,21 +2,36 @@ package main
 
 import (
 	"log"
+	"net/http"
 	"os"
+	"sync"
 	"text/template"
+	"time"
 
 	"github.com/michalswi/osm/utils"
 )
 
 var logger = log.New(os.Stdout, "osm: ", log.LstdFlags|log.Lshortfile)
-
 var port = utils.GetEnv("SERVER_PORT", "5050")
+
+var (
+	logMutex     sync.Mutex
+	logPath      string
+	ProxyClient  *http.Client
+	proxyEnabled bool
+
+	locationsCache      []ClientLocation
+	locationsCacheMu    sync.RWMutex
+	locationsCacheTTL   = 3 * time.Second
+	locationsCacheStamp time.Time
+)
 
 var tpl = template.Must(template.New("page").Parse(`
 <!DOCTYPE html>
 <html>
 <head>
     <title>osm</title>
+    <link rel="icon" href="web/pepe.png" type="image/png" sizes="16x16">
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
