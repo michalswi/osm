@@ -4,8 +4,7 @@ app is using:
 - OpenStreetMap (street maps + dark)
 - Google Maps (satelitte maps)
 
-![alt text](./img/part1.png)
-![alt text](./img/part2.png)
+![alt text](./img/map.png)
 
 
 ### \# proxy
