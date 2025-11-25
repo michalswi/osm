@@ -89,7 +89,7 @@ var tpl_proxy = template.Must(template.New("page").Parse(`
         <div class="block">
             <h2>Search</h2>
             <div class="row">
-                <input id="search" type="text" placeholder="Wrocław, Poland">
+                <input id="search" type="text" placeholder="Wrocław, Poland" onkeydown="if(event.key==='Enter'){searchPlace();}">
                 <button onclick="searchPlace()">Search</button>
             </div>
         </div>
