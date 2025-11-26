@@ -1,7 +1,7 @@
-GOLANG_VERSION := 1.23.2
+GOLANG_VERSION := 1.25.3
 
 APP_NAME := osm
-APP_VERSION := 0.0.1
+APP_VERSION := 0.1.0
 
 .DEFAULT_GOAL := help
 .PHONY: build_mac build_linux

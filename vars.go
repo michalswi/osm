@@ -77,7 +77,7 @@ var tpl = template.Must(template.New("page").Parse(`
         body.light button:hover { background:#ececec; }
 
         #map-type { width:100%; }
-        #github-btn svg { width:18px; height:18px; }
+        #github-btn img { width:18px; height:18px; }
         .row { display:flex; gap:8px; }
         .stretch { width:100%; }
         .col { display:flex; flex-direction:column; gap:8px; }
@@ -105,9 +105,7 @@ var tpl = template.Must(template.New("page").Parse(`
         <div class="row">
             <button id="theme-toggle" class="stretch" onclick="toggleTheme()">🌙 Dark Mode</button>
             <button id="github-btn" onclick="window.open('https://github.com/michalswi/osm','_blank','noopener')" aria-label="GitHub">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
-                    <path d="M9 19c-5 1.5-5-2.5-7-3M17 22v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77 5.44 5.44 0 0 0 3.5 8.55c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/>
-                </svg>
+                <img src="web/github.png" alt="GitHub">
             </button>
         </div>
 
